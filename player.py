@@ -19,19 +19,30 @@ class Player:
         self.dead   = False
         self._tick  = 0
 
+        # Health & combat
+        self.health       = PLAYER_MAX_HEALTH
+        self.inv_timer    = 0           # invincibility frames remaining
+        self.blast_cd     = 0           # blast cooldown frames
+        self._blast_active = False      # True for one frame on trigger
+        self._blast_anim  = 0           # visual countdown
+
     # ------------------------------------------------------------------ input
 
     def handle_input(self, events, keys):
         for ev in events:
-            if ev.type == pygame.KEYDOWN and ev.key in (
-                    pygame.K_SPACE, pygame.K_UP, pygame.K_w):
-                if self.on_ground:
-                    self.vel_y = JUMP_VEL
-                    self.on_ground  = False
-                    self.jumps_used = 1
-                elif self.jumps_used < 2:
-                    self.vel_y = DOUBLE_JUMP_VEL
-                    self.jumps_used = 2
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
+                    if self.on_ground:
+                        self.vel_y = JUMP_VEL
+                        self.on_ground  = False
+                        self.jumps_used = 1
+                    elif self.jumps_used < 2:
+                        self.vel_y = DOUBLE_JUMP_VEL
+                        self.jumps_used = 2
+                if ev.key in (pygame.K_z, pygame.K_q) and self.blast_cd == 0:
+                    self._blast_active = True
+                    self.blast_cd      = BLAST_COOLDOWN
+                    self._blast_anim   = BLAST_ANIM_FRAMES
 
         if self.on_ground and self.scooter_timer == 0:
             if keys[pygame.K_x] or keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
@@ -57,6 +68,10 @@ class Player:
     def update(self, platforms, wind_currents, bisons=()):
         self._tick += 1
 
+        if self.inv_timer  > 0: self.inv_timer  -= 1
+        if self.blast_cd   > 0: self.blast_cd   -= 1
+        if self._blast_anim > 0: self._blast_anim -= 1
+
         if self.gliding:
             self.vel_y = min(self.vel_y + GLIDE_GRAVITY, GLIDE_MAX_FALL)
         else:
@@ -76,7 +91,6 @@ class Player:
 
         self.on_ground = False
 
-        # Static platform collision
         for plat in platforms:
             if not self.rect.colliderect(plat.rect):
                 continue
@@ -90,7 +104,6 @@ class Player:
                 self.rect.top = plat.rect.bottom
                 self.vel_y = 0.0
 
-        # Bison collision — same as platform + carry player horizontally
         for bison in bisons:
             if not self.rect.colliderect(bison.rect):
                 continue
@@ -100,19 +113,51 @@ class Player:
                 self.on_ground  = True
                 self.jumps_used = 0
                 self.gliding    = False
-                # Move with bison
                 self.rect.x += round(bison.vel_x)
                 self.rect.x  = max(0, min(WIDTH - self.W, self.rect.x))
 
-        # Wind current
         for wc in wind_currents:
             if self.rect.colliderect(wc.rect):
                 self.vel_y = WIND_BOOST_VEL
                 self.jumps_used = min(self.jumps_used, 1)
 
+        # Fall off world
+        if self.rect.top > PLAYER_START_Y + 120:
+            self.dead = True
+
+    # ----------------------------------------------------------------- combat
+
+    def get_blast_rect(self):
+        """One-frame blast hitbox, then clears the flag."""
+        if not self._blast_active:
+            return None
+        self._blast_active = False
+        if self.facing > 0:
+            return pygame.Rect(self.rect.right, self.rect.top, BLAST_RANGE, self.H)
+        else:
+            return pygame.Rect(self.rect.left - BLAST_RANGE, self.rect.top, BLAST_RANGE, self.H)
+
+    def take_damage(self) -> bool:
+        """Returns True if damage was applied."""
+        if self.inv_timer > 0:
+            return False
+        self.health   -= 1
+        self.inv_timer = INV_FRAMES
+        if self.health <= 0:
+            self.dead = True
+        return True
+
+    def stomp_bounce(self):
+        self.vel_y = JUMP_VEL * 0.55
+        self.jumps_used = 1
+
     # ------------------------------------------------------------------ draw
 
     def draw(self, surface, cam_y: float):
+        # Flash during invincibility
+        if self.inv_timer > 0 and (self.inv_timer // 5) % 2 == 0:
+            return
+
         dx = self.rect.x
         dy = self.rect.y - round(cam_y)
         cx = dx + self.W // 2
@@ -125,6 +170,7 @@ class Player:
             self._draw_body(surface, dx, dy, cx)
 
         self._draw_head(surface, cx, dy - 9)
+        self._draw_blast(surface, dx, dy)
 
     def _draw_body(self, surface, dx, dy, cx):
         bob = round(2 * math.sin(self._tick * 0.25)) if self.on_ground and self.vel_x != 0 else 0
@@ -136,7 +182,7 @@ class Player:
         pygame.draw.rect(surface, C_BODY, (arm_x, dy + 4, 5, 10))
 
     def _draw_glider(self, surface, dx, dy, cx):
-        pygame.draw.rect(surface, C_PANTS, (dx + 2,          dy + self.H // 2 + 2, 8, self.H // 2 - 2))
+        pygame.draw.rect(surface, C_PANTS, (dx + 2,           dy + self.H // 2 + 2, 8, self.H // 2 - 2))
         pygame.draw.rect(surface, C_PANTS, (dx + self.W - 10, dy + self.H // 2 + 2, 8, self.H // 2 - 2))
         pygame.draw.rect(surface, C_BODY,  (dx, dy, self.W, self.H // 2 + 6))
         pygame.draw.rect(surface, C_BELT,  (dx, dy + self.H // 2 + 2, self.W, 3))
@@ -170,3 +216,23 @@ class Player:
         ex = cx + (4 if self.facing > 0 else -4)
         pygame.draw.circle(surface, C_EYE,   (ex, cy + 2), 2)
         pygame.draw.circle(surface, C_WHITE, (ex + 1, cy + 1), 1)
+
+    def _draw_blast(self, surface, dx, dy):
+        if self._blast_anim <= 0:
+            return
+        t  = self._blast_anim / BLAST_ANIM_FRAMES
+        bx = (self.rect.right if self.facing > 0 else self.rect.left - BLAST_RANGE) - round(0)
+        # Adjust to screen coords (dy already has cam subtracted for body, use rect directly)
+        bx_s = bx
+        by_s = dy + 4
+        blast_surf = pygame.Surface((BLAST_RANGE, self.H - 8), pygame.SRCALPHA)
+        alpha = int(160 * t)
+        blast_surf.fill((*C_WIND_GLOW, alpha))
+        surface.blit(blast_surf, (bx_s, by_s))
+        # Streak lines
+        lx_start = bx_s if self.facing > 0 else bx_s + BLAST_RANGE
+        lx_step  = (BLAST_RANGE // 4) * self.facing
+        for i in range(4):
+            lx = lx_start + lx_step * i
+            pygame.draw.line(surface, C_WIND_GLOW,
+                             (lx, by_s + 4), (lx + lx_step, by_s + self.H // 2 - 4), 1)
