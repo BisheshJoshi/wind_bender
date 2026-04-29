@@ -61,6 +61,6 @@ python main.py
 
 ## Members
 
--
--
--
+-Klenis Arapaj
+-Shankar Jora
+-Bishesh Joshi
