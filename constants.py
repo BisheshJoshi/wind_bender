@@ -6,6 +6,11 @@ TITLE  = "Airbender Spires"
 # Camera
 CAM_LERP = 0.10
 
+# Rising death floor
+FLOOR_RISE_SPEED = 0.35    # px / frame at start
+FLOOR_RISE_MAX   = 1.80    # px / frame ceiling
+FLOOR_RISE_ACCEL = 0.00012 # px / frame² acceleration
+
 # Physics
 GRAVITY          = 0.55
 WALK_SPEED       = 3.5
