@@ -214,8 +214,11 @@ class Player:
         if not frames:
             return False
 
-        fps_divisor = 5   # advance one frame every N game ticks
-        frame_idx   = (self._tick // fps_divisor) % len(frames)
+        if key == "idle":
+            frame_idx = 0   # standing still = no animation
+        else:
+            fps_divisor = 5
+            frame_idx   = (self._tick // fps_divisor) % len(frames)
         frame = frames[frame_idx]
 
         fw, fh = frame.get_size()

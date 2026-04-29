@@ -169,13 +169,35 @@ class Collectible:
 # ── Bison ──────────────────────────────────────────────────────────────────────
 
 class Bison:
-    BACK_W = 82
-    BODY_H = 30
-    HEAD_W = 38
-    HEAD_H = 28
+    BACK_W  = 90   # collision platform width
     BOB_AMP = 8
 
+    # Sprite loaded once on first instantiation
+    _sprite_r: pygame.Surface = None
+    _sprite_l: pygame.Surface = None
+    _sprite_loaded = False
+
+    @classmethod
+    def _load_sprite(cls):
+        if cls._sprite_loaded:
+            return
+        cls._sprite_loaded = True
+        try:
+            import sprite_loader
+            frames = sprite_loader.load().get("appa", [])
+            if frames:
+                raw = frames[0]
+                # Scale so the sprite is BACK_W wide; height scales proportionally
+                sw, sh = raw.get_size()
+                new_h  = round(sh * cls.BACK_W / sw)
+                cls._sprite_r = pygame.transform.scale(raw, (cls.BACK_W, new_h))
+                cls._sprite_r.set_colorkey((255, 255, 255))
+                cls._sprite_l = pygame.transform.flip(cls._sprite_r, True, False)
+        except Exception:
+            pass
+
     def __init__(self, x: float, world_y: float, direction: int = 1):
+        self._load_sprite()
         self.world_x = float(x)
         self.world_y = float(world_y)
         self.vel_x   = 1.4 * direction
@@ -195,35 +217,28 @@ class Bison:
         self._update_rect()
 
     def draw(self, surface, cam_y: float):
-        dx  = round(self.world_x)
-        dy  = round(self._back_y) - round(cam_y)
-        if dy - self.HEAD_H - 10 > HEIGHT or dy + self.BODY_H + 15 < 0:
+        dx = round(self.world_x)
+        dy = round(self._back_y) - round(cam_y)
+
+        spr = self._sprite_r if self.vel_x > 0 else self._sprite_l
+        if spr:
+            sh = spr.get_height()
+            if -sh <= dy <= HEIGHT + sh:
+                surface.blit(spr, (dx, dy))
+            return
+
+        # Fallback: primitive drawing if sprite unavailable
+        BODY_H, HEAD_W, HEAD_H = 30, 38, 28
+        if dy - HEAD_H - 10 > HEIGHT or dy + BODY_H + 15 < 0:
             return
         fr = self.vel_x > 0
         for i in range(3):
             lx    = dx + 10 + i * (self.BACK_W // 3)
             swing = round(4 * math.sin(self._tick * 0.12 + i * 1.2))
-            pygame.draw.line(surface, C_BISON_LEG, (lx, dy + self.BODY_H),
-                             (lx + swing, dy + self.BODY_H + 13), 3)
-        pygame.draw.rect(surface, C_BISON, (dx, dy, self.BACK_W, self.BODY_H), border_radius=10)
-        pygame.draw.rect(surface, C_BISON_OUT, (dx, dy, self.BACK_W, self.BODY_H), 1, border_radius=10)
-        pygame.draw.line(surface, C_BISON_OUT,
-                         (dx + 8, dy + 2), (dx + self.BACK_W - 8, dy + 2), 1)
-        tx = dx if fr else dx + self.BACK_W
-        pygame.draw.line(surface, C_BISON_OUT, (tx, dy + self.BODY_H // 2),
-                         (tx + (-18 if fr else 18), dy + self.BODY_H // 2 - 8), 3)
-        pygame.draw.circle(surface, C_BISON, (tx + (-18 if fr else 18), dy + self.BODY_H // 2 - 8), 5)
-        hx = (dx + self.BACK_W - 10) if fr else (dx - self.HEAD_W + 10)
-        hy = dy - 8
-        pygame.draw.ellipse(surface, C_BISON,     (hx, hy, self.HEAD_W, self.HEAD_H))
-        pygame.draw.ellipse(surface, C_BISON_OUT,  (hx, hy, self.HEAD_W, self.HEAD_H), 1)
-        acx = hx + self.HEAD_W // 2
-        pygame.draw.polygon(surface, C_ARROW,
-                            [(acx, hy + 4), (acx - 4, hy + 11), (acx + 4, hy + 11)])
-        ex = hx + (self.HEAD_W - 7 if fr else 7)
-        ey = hy + self.HEAD_H // 2 + 2
-        pygame.draw.circle(surface, C_EYE,   (ex, ey), 2)
-        pygame.draw.circle(surface, C_WHITE, (ex + 1, ey - 1), 1)
+            pygame.draw.line(surface, C_BISON_LEG, (lx, dy + BODY_H),
+                             (lx + swing, dy + BODY_H + 13), 3)
+        pygame.draw.rect(surface, C_BISON, (dx, dy, self.BACK_W, BODY_H), border_radius=10)
+        pygame.draw.rect(surface, C_BISON_OUT, (dx, dy, self.BACK_W, BODY_H), 1, border_radius=10)
 
 
 # ── Enemy (Fire Nation soldier) ────────────────────────────────────────────────

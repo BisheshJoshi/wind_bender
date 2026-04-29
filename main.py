@@ -208,6 +208,13 @@ def main():
     font_big = pygame.font.SysFont("Arial", 36, bold=True)
     font_sm  = pygame.font.SysFont("Arial", 17)
 
+    try:
+        pygame.mixer.music.load("Light battle.ogg")
+        pygame.mixer.music.set_volume(0.55)
+        pygame.mixer.music.play(-1)
+    except Exception:
+        pass
+
     bg           = Background()
     board        = scoreboard.load()
     floor_grad   = _build_floor_gradient()
