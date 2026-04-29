@@ -7,9 +7,11 @@ from constants import *
 class Player:
     W, H = 22, 32
 
-    # Sprites loaded once at first instantiation
+    # Class-level resources loaded once
     _sprites: dict = {}
     _sprites_loaded = False
+    _sounds: dict = {}
+    _sounds_loaded = False
 
     @classmethod
     def _load_sprites(cls):
@@ -17,8 +19,20 @@ class Player:
             cls._sprites = sprite_loader.load()
             cls._sprites_loaded = True
 
+    @classmethod
+    def _load_sounds(cls):
+        if not cls._sounds_loaded:
+            cls._sounds_loaded = True
+            try:
+                import sounds as snd
+                cls._sounds = snd.load()
+            except Exception:
+                cls._sounds = {}
+
     def __init__(self, x, y):
         self._load_sprites()
+        self._load_sounds()
+
         self.rect = pygame.Rect(x - self.W // 2, y - self.H, self.W, self.H)
         self.vel_x = 0.0
         self.vel_y = 0.0
@@ -28,15 +42,31 @@ class Player:
         self.scooter_timer = 0
         self.scooter_dir   = 1
         self.facing = 1
-        self.dead   = False
+        self._dead  = False     # use property to intercept death for sound
         self._tick  = 0
 
         # Health & combat
-        self.health       = PLAYER_MAX_HEALTH
-        self.inv_timer    = 0           # invincibility frames remaining
-        self.blast_cd     = 0           # blast cooldown frames
-        self._blast_active = False      # True for one frame on trigger
-        self._blast_anim  = 0           # visual countdown
+        self.health        = PLAYER_MAX_HEALTH
+        self.inv_timer     = 0
+        self.blast_cd      = 0
+        self._blast_active = False
+        self._blast_anim   = 0
+        self._death_played = False
+
+    # ---------------------------------------------------------------- property
+
+    @property
+    def dead(self):
+        return self._dead
+
+    @dead.setter
+    def dead(self, value: bool):
+        if value and not self._dead and not self._death_played:
+            self._death_played = True
+            s = self._sounds.get('death')
+            if s:
+                s.play()
+        self._dead = value
 
     # ------------------------------------------------------------------ input
 
@@ -56,11 +86,15 @@ class Player:
                     self.blast_cd      = BLAST_COOLDOWN
                     self._blast_anim   = BLAST_ANIM_FRAMES
 
-        if self.on_ground and self.scooter_timer == 0:
+        # Dash works both on ground AND mid-air
+        if self.scooter_timer == 0:
             if keys[pygame.K_x] or keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
                 self.scooter_timer = SCOOTER_FRAMES
                 self.scooter_dir   = self.facing
                 self.vel_x = SCOOTER_SPEED * self.scooter_dir
+                s = self._sounds.get('wind')
+                if s:
+                    s.play()
 
         if self.scooter_timer == 0:
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
@@ -133,14 +167,12 @@ class Player:
                 self.vel_y = WIND_BOOST_VEL
                 self.jumps_used = min(self.jumps_used, 1)
 
-        # Fall off world
         if self.rect.top > PLAYER_START_Y + 120:
             self.dead = True
 
     # ----------------------------------------------------------------- combat
 
     def get_blast_rect(self):
-        """One-frame blast hitbox, then clears the flag."""
         if not self._blast_active:
             return None
         self._blast_active = False
@@ -150,11 +182,13 @@ class Player:
             return pygame.Rect(self.rect.left - BLAST_RANGE, self.rect.top, BLAST_RANGE, self.H)
 
     def take_damage(self) -> bool:
-        """Returns True if damage was applied."""
         if self.inv_timer > 0:
             return False
         self.health   -= 1
         self.inv_timer = INV_FRAMES
+        s = self._sounds.get('hit')
+        if s:
+            s.play()
         if self.health <= 0:
             self.dead = True
         return True
@@ -166,7 +200,6 @@ class Player:
     # ------------------------------------------------------------------ draw
 
     def draw(self, surface, cam_y: float):
-        # Flash during invincibility
         if self.inv_timer > 0 and (self.inv_timer // 5) % 2 == 0:
             return
 
@@ -175,27 +208,22 @@ class Player:
         cx = dx + self.W // 2
 
         if self._sprites and not self._draw_sprite(surface, dx, dy):
-            # Sprite draw failed; fall back to primitives
-            if self.scooter_timer > 0:
-                self._draw_scooter(surface, dx, dy, cx)
-            elif self.gliding:
-                self._draw_glider(surface, dx, dy, cx)
-            else:
-                self._draw_body(surface, dx, dy, cx)
-            self._draw_head(surface, cx, dy - 9)
+            self._draw_primitive(surface, dx, dy, cx)
         elif not self._sprites:
-            if self.scooter_timer > 0:
-                self._draw_scooter(surface, dx, dy, cx)
-            elif self.gliding:
-                self._draw_glider(surface, dx, dy, cx)
-            else:
-                self._draw_body(surface, dx, dy, cx)
-            self._draw_head(surface, cx, dy - 9)
+            self._draw_primitive(surface, dx, dy, cx)
 
         self._draw_blast(surface, dx, dy)
 
+    def _draw_primitive(self, surface, dx, dy, cx):
+        if self.scooter_timer > 0:
+            self._draw_scooter(surface, dx, dy, cx)
+        elif self.gliding:
+            self._draw_glider(surface, dx, dy, cx)
+        else:
+            self._draw_body(surface, dx, dy, cx)
+        self._draw_head(surface, cx, dy - 9)
+
     def _draw_sprite(self, surface, dx: int, dy: int) -> bool:
-        """Draw the correct animated sprite frame. Returns False if no frames."""
         sp = self._sprites
 
         if self.scooter_timer > 0:
@@ -209,24 +237,29 @@ class Player:
         else:
             key = "idle"
 
-        # Fallback chain
         frames = sp.get(key) or sp.get("idle") or []
         if not frames:
             return False
 
         if key == "idle":
-            frame_idx = 0   # standing still = no animation
+            frame_idx = 0
         else:
-            fps_divisor = 5
+            fps_divisor = 3 if key == "blast" else 5
             frame_idx   = (self._tick // fps_divisor) % len(frames)
         frame = frames[frame_idx]
 
+        # Scale up idle (standing) and glide (air-sliding)
+        if key == "idle":
+            fw, fh = frame.get_size()
+            frame = pygame.transform.scale(frame, (round(fw * 1.45), round(fh * 1.45)))
+        elif key == "glide":
+            fw, fh = frame.get_size()
+            frame = pygame.transform.scale(frame, (round(fw * 1.3), round(fh * 1.3)))
+
         fw, fh = frame.get_size()
-        # Centre the sprite on the player rect, bottom-aligned
         sx = dx + self.W // 2 - fw // 2
         sy = dy + self.H - fh
 
-        # Flip for left-facing states that only have right-facing art
         needs_flip = (self.facing < 0 and key in ("idle", "glide", "blast"))
         if needs_flip:
             frame = pygame.transform.flip(frame, True, False)
@@ -282,16 +315,12 @@ class Player:
     def _draw_blast(self, surface, dx, dy):
         if self._blast_anim <= 0:
             return
-        t  = self._blast_anim / BLAST_ANIM_FRAMES
-        bx = (self.rect.right if self.facing > 0 else self.rect.left - BLAST_RANGE) - round(0)
-        # Adjust to screen coords (dy already has cam subtracted for body, use rect directly)
-        bx_s = bx
+        t    = self._blast_anim / BLAST_ANIM_FRAMES
+        bx_s = self.rect.right if self.facing > 0 else self.rect.left - BLAST_RANGE
         by_s = dy + 4
         blast_surf = pygame.Surface((BLAST_RANGE, self.H - 8), pygame.SRCALPHA)
-        alpha = int(160 * t)
-        blast_surf.fill((*C_WIND_GLOW, alpha))
+        blast_surf.fill((*C_WIND_GLOW, int(160 * t)))
         surface.blit(blast_surf, (bx_s, by_s))
-        # Streak lines
         lx_start = bx_s if self.facing > 0 else bx_s + BLAST_RANGE
         lx_step  = (BLAST_RANGE // 4) * self.facing
         for i in range(4):

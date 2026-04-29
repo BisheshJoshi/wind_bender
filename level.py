@@ -113,20 +113,53 @@ class WindCurrent:
         r = self.rect.move(0, -round(cam_y))
         if r.bottom < 0 or r.top > HEIGHT:
             return
+
+        t  = self._tick
+        cx = r.centerx
+        h  = r.height
+        max_w = self.rect.w + 28   # rings bulge wider than the rect
+
+        # Soft background glow column
         surface.blit(self._glow, (r.left - 12, r.top))
         surface.blit(self._core, r.topleft)
-        for i in range(6):
-            offset = (self._tick * 5 + i * (self.rect.h // 6)) % self.rect.h
-            x  = r.left + (r.w * (i + 1)) // 7
-            y1 = r.top  + offset
-            y2 = r.top  + offset - 26
-            pygame.draw.line(surface, C_WIND, (x, y1), (x, y2),
-                             2 if i % 2 == 0 else 1)
-        chev_y = r.bottom - (self._tick * 3) % self.rect.h
-        if r.top <= chev_y <= r.bottom:
-            mx = r.centerx
-            pygame.draw.line(surface, C_WIND_GLOW, (mx - 9, chev_y + 7), (mx, chev_y), 2)
-            pygame.draw.line(surface, C_WIND_GLOW, (mx + 9, chev_y + 7), (mx, chev_y), 2)
+
+        # ── Tornado rings (horizontal ellipses that scroll upward + spin) ──
+        NUM_RINGS = 14
+        for i in range(NUM_RINGS):
+            # Animate rings flowing upward; wrap so they loop continuously
+            frac = ((i / NUM_RINGS) + t * 0.020) % 1.0
+
+            # Profile: narrow at very bottom/top, wide in middle
+            bulge  = math.sin(frac * math.pi) ** 0.6
+            ring_w = int(8 + bulge * max_w)
+            ry     = r.bottom - int(frac * h)
+
+            if not (r.top - 8 <= ry <= r.bottom + 8):
+                continue
+
+            # Spin: oscillate the ring's horizontal center
+            tilt = int(math.sin(t * 0.075 + frac * math.pi * 2.8) * (ring_w // 3))
+            alpha = int(55 + 150 * bulge)
+
+            ew, eh = ring_w, 8
+            rs = pygame.Surface((ew + 4, eh + 4), pygame.SRCALPHA)
+            pygame.draw.ellipse(rs, (*C_WIND_GLOW, alpha), (2, 2, ew, eh), 2)
+            surface.blit(rs, (cx - ew // 2 + tilt, ry - eh // 2))
+
+        # ── Debris particles spiraling upward along the helix ──
+        for i in range(10):
+            frac  = ((i / 10) + t * 0.017) % 1.0
+            angle = t * 0.11 + i * (2 * math.pi / 10)
+            bulge = math.sin(frac * math.pi) ** 0.6
+            radius = int(6 + bulge * (max_w // 2))
+            px = cx + int(radius * math.cos(angle))
+            py = r.bottom - int(frac * h)
+            if r.top <= py <= r.bottom:
+                size = max(1, int(2.5 * bulge) + 1)
+                pygame.draw.circle(surface, C_WIND_GLOW, (px, py), size)
+
+        # Bright spine
+        pygame.draw.line(surface, C_WIND_GLOW, (cx, r.top), (cx, r.bottom), 1)
 
 
 # ── Collectible ────────────────────────────────────────────────────────────────

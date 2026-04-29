@@ -201,6 +201,7 @@ def make_game():
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
+    pygame.mixer.pre_init(22050, -16, 2, 512)
     pygame.init()
     screen   = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
     pygame.display.set_caption(TITLE)
