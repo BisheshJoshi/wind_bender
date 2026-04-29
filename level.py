@@ -329,6 +329,7 @@ class ProceduralLevel:
         self.fireballs     : list[Fireball]    = []
         self._gen_y   = float(PLAYER_START_Y)
         self._last_cx = float(PLAYER_START_X)
+        self._direction = 1
 
         # Wide ground
         self.platforms.append(Platform(0, PLAYER_START_Y, WIDTH, 40, zone=0))
@@ -345,18 +346,21 @@ class ProceduralLevel:
         y = self._gen_y
 
         while y > target_y:
-            gap_y = self._rng.randint(115, 200)
+            gap_y = self._rng.randint(115, 165)
             y    -= gap_y
 
             altitude = self._altitude(y)
             zone     = _zone_from_alt(altitude)
 
-            drift    = self._rng.randint(60, 200)
-            side     = 1 if self._rng.random() > 0.5 else -1
-            new_w    = self._rng.randint(65, 145)
-            new_cx   = self._last_cx + side * drift
+            drift    = self._rng.randint(90, 160)
+            new_w    = self._rng.randint(70, 130)
+            new_cx   = self._last_cx + self._direction * drift
             new_x    = int(new_cx - new_w // 2)
             new_x    = max(8, min(WIDTH - new_w - 8, new_x))
+            # Flip direction; if clamped to wall, force flip back so we don't hug the edge
+            self._direction *= -1
+            if new_x <= 8 or new_x + new_w >= WIDTH - 8:
+                self._direction *= -1
 
             # Crumbling or solid platform
             if self._rng.random() < self._CRUMBLE_CHANCE[zone]:

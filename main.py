@@ -202,7 +202,7 @@ def make_game():
 
 def main():
     pygame.init()
-    screen   = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen   = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
     pygame.display.set_caption(TITLE)
     clock    = pygame.time.Clock()
     font_big = pygame.font.SysFont("Arial", 36, bold=True)
@@ -265,6 +265,9 @@ def main():
             death_floor_y = min(death_floor_y, cam_floor + HEIGHT)
 
             # ── Input & physics ───────────────────────────────────────────────
+            for ev in events:
+                if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                    state = "start"
             player.handle_input(events, keys)
             blast_rect = player.get_blast_rect()
 
