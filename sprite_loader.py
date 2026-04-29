@@ -5,8 +5,10 @@ to match the game's player dimensions.
 
 import pygame
 
-SHEET_PATH = "Game Boy Advance - Avatar_ The Last Airbender - Playable Characters - Avatar Aang.png"
-BG = (255, 255, 255)
+SHEET_PATH       = "Game Boy Advance - Avatar_ The Last Airbender - Playable Characters - Avatar Aang.png"
+DRAKE_SHEET_PATH = "NES - Sword Master - Enemies & Bosses - Fire Drake.png"
+BG       = (255, 255, 255)
+BG_BLACK = (0,   0,   0)
 
 # (x, y, w, h, expected_frame_count)
 _STRIPS = {
@@ -120,3 +122,46 @@ def load() -> dict:
         result["scoot_l"] = flip_frames(result["scoot_r"])
 
     return result
+
+
+def load_drake() -> dict:
+    """
+    Returns {
+      "enemy":    [Surface, Surface],  # tall flame, 2-frame flicker
+      "fireball": [Surface, Surface],  # horizontal fireball, 2-frame anim
+    }
+    Returns {} on failure.
+    """
+    try:
+        sheet = pygame.image.load(DRAKE_SHEET_PATH).convert()
+    except Exception:
+        return {}
+
+    # Manually mapped bounding boxes from NES sprite sheet
+    # (x, y, w, h) — black (0,0,0) background
+    crops = {
+        "flame_tall":  (35, 32, 18, 39),   # standing flame — enemy body
+        "fireball_a":  (4,  4,  16, 16),   # flying fireball frame A
+        "fireball_b":  (24, 4,  16, 15),   # flying fireball frame B
+    }
+
+    def extract(x, y, w, h, target_h):
+        sub = sheet.subsurface((x, y, w, h)).copy()
+        sub.set_colorkey(BG_BLACK)
+        new_w = max(1, round(w * target_h / h))
+        scaled = pygame.transform.scale(sub, (new_w, target_h))
+        scaled.set_colorkey(BG_BLACK)
+        return scaled
+
+    tall  = extract(*crops["flame_tall"], 44)   # ~20x44
+    fb_a  = extract(*crops["fireball_a"], 20)   # 20x20
+    fb_b  = extract(*crops["fireball_b"], 20)   # 20x20
+
+    # Second enemy frame: horizontally squash the tall flame slightly
+    tall2 = pygame.transform.scale(tall, (tall.get_width() - 4, tall.get_height() + 4))
+    tall2.set_colorkey(BG_BLACK)
+
+    return {
+        "enemy":    [tall, tall2],
+        "fireball": [fb_a, fb_b],
+    }

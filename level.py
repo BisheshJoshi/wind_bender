@@ -246,7 +246,22 @@ class Bison:
 class Enemy:
     W, H = 18, 28
 
+    _sprites: list = []
+    _sprites_loaded = False
+
+    @classmethod
+    def _load_sprites(cls):
+        if cls._sprites_loaded:
+            return
+        cls._sprites_loaded = True
+        try:
+            import sprite_loader
+            cls._sprites = sprite_loader.load_drake().get("enemy", [])
+        except Exception:
+            cls._sprites = []
+
     def __init__(self, x: float, y: float, plat_left: int, plat_right: int, zone: int = 0):
+        self._load_sprites()
         self.rect       = pygame.Rect(int(x) - self.W // 2, int(y) - self.H, self.W, self.H)
         self.vel_x      = ENEMY_SPEED
         self.plat_left  = plat_left
@@ -254,10 +269,12 @@ class Enemy:
         self.zone       = zone
         self.alive      = True
         self._fire_timer = random.randint(ENEMY_FIRE_MIN, ENEMY_FIRE_MAX)
+        self._tick       = 0
 
     def update(self) -> bool:
         """Returns True when a fireball should be spawned."""
         self.rect.x += round(self.vel_x)
+        self._tick  += 1
         if self.rect.left <= self.plat_left or self.rect.right >= self.plat_right:
             self.vel_x *= -1
 
@@ -272,19 +289,23 @@ class Enemy:
         if r.bottom < 0 or r.top > HEIGHT:
             return
 
+        if self._sprites:
+            frame = self._sprites[(self._tick // 8) % len(self._sprites)]
+            fw, fh = frame.get_size()
+            sx = r.centerx - fw // 2
+            sy = r.bottom  - fh
+            surface.blit(frame, (sx, sy))
+            return
+
+        # Fallback: primitive soldier drawing
         armor = C_SPIRIT_ARMOR if self.zone == 3 else C_ENEMY_ARMOR
         helm  = C_SPIRIT_HELM  if self.zone == 3 else C_ENEMY_HELM
-
-        # Body
         pygame.draw.rect(surface, armor, r, border_radius=3)
-        # Helmet — top third
         pygame.draw.rect(surface, helm,
                          (r.left + 1, r.top, r.width - 2, r.height // 3),
                          border_radius=3)
-        # Visor slit
         pygame.draw.rect(surface, C_ENEMY_EYE,
                          (r.left + 3, r.top + r.height // 4, r.width - 6, 4))
-        # Outline
         pygame.draw.rect(surface, (0, 0, 0), r, 1, border_radius=3)
 
 
@@ -293,10 +314,26 @@ class Enemy:
 class Fireball:
     R = 7
 
+    _sprites: list = []
+    _sprites_loaded = False
+
+    @classmethod
+    def _load_sprites(cls):
+        if cls._sprites_loaded:
+            return
+        cls._sprites_loaded = True
+        try:
+            import sprite_loader
+            cls._sprites = sprite_loader.load_drake().get("fireball", [])
+        except Exception:
+            cls._sprites = []
+
     def __init__(self, x: float, y: float, direction: int):
+        self._load_sprites()
         self.x     = float(x)
         self.y     = float(y)
         self.vel_x = FIREBALL_SPEED * direction
+        self.dir   = direction
         self.alive = True
         self._tick = 0
         self._update_rect()
@@ -317,6 +354,16 @@ class Fireball:
         cy = int(self.y) - round(cam_y)
         if not (-20 <= cy <= HEIGHT + 20):
             return
+
+        if self._sprites:
+            frame = self._sprites[self._tick % len(self._sprites)]
+            if self.dir < 0:
+                frame = pygame.transform.flip(frame, True, False)
+            fw, fh = frame.get_size()
+            surface.blit(frame, (cx - fw // 2, cy - fh // 2))
+            return
+
+        # Fallback: primitive fireball
         pygame.draw.circle(surface, C_FIREBALL,  (cx, cy), self.R + 3)
         pygame.draw.circle(surface, C_FIREBALL2, (cx, cy), self.R)
         flicker = round(2 * math.sin(self._tick * 0.4))
