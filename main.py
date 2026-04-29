@@ -132,14 +132,17 @@ def draw_start(surface, font_big, font_sm, board: list):
         (font_sm,  "Move    Arrows / WASD",                         C_WHITE),
         (font_sm,  "Jump    SPACE  (press again mid-air = double)", C_WHITE),
         (font_sm,  "Glide   hold SPACE while falling",              C_WHITE),
-        (font_sm,  "Scooter X / Shift  (on ground)",                C_WHITE),
+        (font_sm,  "Dash    X / Shift  (ground or mid-air)",         C_WHITE),
         (font_sm,  "Air Blast   Z / Q  — kills enemies",            C_WIND_GLOW),
         (font_sm,  "Stomp   land on enemy head",                    C_GOLD),
     ]
     if board:
         rows += [(font_sm, "", C_WHITE),
                  (font_sm, f"Best:  {board[0]['name']}  {board[0]['score']:,}", C_GOLD)]
-    rows += [(font_sm, "", C_WHITE), (font_sm, "Press any key to start", C_GOLD)]
+    rows += [
+        (font_sm, "", C_WHITE),
+        (font_sm, "Press any key to start     ESC = quit", C_GOLD),
+    ]
     for i, (fnt, text, color) in enumerate(rows):
         if text:
             s = fnt.render(text, True, color)
@@ -248,6 +251,9 @@ def main():
             draw_start(screen, font_big, font_sm, board)
             for ev in events:
                 if ev.type == pygame.KEYDOWN:
+                    if ev.key == pygame.K_ESCAPE:
+                        pygame.quit()
+                        sys.exit()
                     level, player, cam_y, cam_floor, death_floor_y, floor_spd = make_game()
                     score = scroll_count = game_tick = 0
                     zone = prev_zone = zone_timer = 0
