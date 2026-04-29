@@ -1,101 +1,132 @@
 import sys
 import pygame
+import scores as scoreboard
 from constants import *
 from background import Background
 from player import Player
-from level import Level, PLAYER_START
+from level import ProceduralLevel
 
 
 # ── Sky gradient ───────────────────────────────────────────────────────────────
 
 def draw_sky(surface, cam_y: float):
-    """Interpolate sky colour from light-blue (ground) to deep-blue (summit)."""
-    t = max(0.0, min(1.0, 1.0 - cam_y / LEVEL_HEIGHT))
-    r = int(C_SKY_TOP[0] * t + C_SKY_BOT[0] * (1 - t))
-    g = int(C_SKY_TOP[1] * t + C_SKY_BOT[1] * (1 - t))
-    b = int(C_SKY_TOP[2] * t + C_SKY_BOT[2] * (1 - t))
+    """Three-stop gradient: low=light blue, mid=blue, high=deep blue."""
+    altitude = max(0.0, PLAYER_START_Y - cam_y)
+    t = min(1.0, altitude / 3800)
+    if t < 0.5:
+        s = t * 2
+        r = int(C_SKY_LOW[0] * (1 - s) + C_SKY_MID[0] * s)
+        g = int(C_SKY_LOW[1] * (1 - s) + C_SKY_MID[1] * s)
+        b = int(C_SKY_LOW[2] * (1 - s) + C_SKY_MID[2] * s)
+    else:
+        s = (t - 0.5) * 2
+        r = int(C_SKY_MID[0] * (1 - s) + C_SKY_HIGH[0] * s)
+        g = int(C_SKY_MID[1] * (1 - s) + C_SKY_HIGH[1] * s)
+        b = int(C_SKY_MID[2] * (1 - s) + C_SKY_HIGH[2] * s)
     surface.fill((r, g, b))
 
 
 # ── HUD ────────────────────────────────────────────────────────────────────────
 
-def draw_hud(surface, font, score: int, total: int, height_pct: float):
-    # Scroll counter
-    txt = font.render(f"Scrolls  {score} / {total}", True, C_WHITE)
-    surface.blit(txt, (10, 10))
+def draw_hud(surface, font, score: int, scroll_count: int, scroll_speed: float):
+    # Score
+    surface.blit(font.render(f"Score  {score:,}", True, C_WHITE), (10, 10))
+    # Scrolls
+    surface.blit(font.render(f"Scrolls  {scroll_count}", True, C_GOLD), (10, 32))
 
-    # Altitude bar (right edge, fills upward)
-    BAR_H = 160
+    # Speed level bar (right side)
+    BAR_H = 120
     bx, by, bw = WIDTH - 18, 10, 10
-    pygame.draw.rect(surface, C_DARK, (bx, by, bw, BAR_H))
-    fill = int(BAR_H * height_pct)
-    pygame.draw.rect(surface, C_COLLECT, (bx, by + BAR_H - fill, bw, fill))
-    pygame.draw.rect(surface, C_WHITE,   (bx, by, bw, BAR_H), 1)
-    # Peak marker
-    pygame.draw.rect(surface, C_COLLECT, (bx - 3, by, bw + 6, 3))
+    t = min(1.0, (scroll_speed - SCROLL_SPEED_START) /
+                  (SCROLL_SPEED_MAX - SCROLL_SPEED_START))
+    fill = int(BAR_H * t)
+    col  = (
+        int(100 + 155 * t),   # R increases with speed
+        int(220 - 150 * t),   # G decreases
+        int(255 - 200 * t),   # B decreases
+    )
+    pygame.draw.rect(surface, C_DARK,  (bx, by, bw, BAR_H))
+    pygame.draw.rect(surface, col,     (bx, by + BAR_H - fill, bw, fill))
+    pygame.draw.rect(surface, C_WHITE, (bx, by, bw, BAR_H), 1)
+    spd_lbl = font.render("spd", True, C_WHITE)
+    surface.blit(spd_lbl, spd_lbl.get_rect(centerx=bx + bw // 2, top=by + BAR_H + 4))
 
-    # Controls hint — only shown near the start
-    if height_pct < 0.04:
+    # Controls hint on first few seconds
+    if scroll_speed < SCROLL_SPEED_START + 0.05:
         hint = font.render(
-            "SPACE jump · X/Shift scooter · hold SPACE (falling) glide",
+            "SPACE jump · double-jump · hold=glide · X/Shift=scooter",
             True, C_WHITE)
         surface.blit(hint, hint.get_rect(centerx=WIDTH // 2, bottom=HEIGHT - 8))
 
 
-# ── Screen overlays ────────────────────────────────────────────────────────────
+# ── Overlays ───────────────────────────────────────────────────────────────────
 
-def draw_start(surface, font_big, font_sm):
-    surface.fill(C_SKY_TOP)
+def draw_start(surface, font_big, font_sm, board: list):
+    surface.fill(C_SKY_MID)
     rows = [
-        (font_big, "AIRBENDER SPIRES",                              C_WHITE),
-        (font_sm,  "",                                              C_WHITE),
-        (font_sm,  "Reach the peak of the Air Temple!",            C_WHITE),
-        (font_sm,  "",                                              C_WHITE),
-        (font_sm,  "Move      Arrow keys / WASD",                  C_WHITE),
-        (font_sm,  "Jump      SPACE  (press again = double-jump)", C_WHITE),
-        (font_sm,  "Glide     hold SPACE while falling",           C_WHITE),
-        (font_sm,  "Scooter   X or Shift  (ground only)",          C_WHITE),
-        (font_sm,  "",                                              C_WHITE),
-        (font_sm,  "Press any key to begin",                       C_COLLECT),
+        (font_big, "AIRBENDER SPIRES",                             C_WHITE),
+        (font_sm,  "",                                             C_WHITE),
+        (font_sm,  "Climb the temple. Survive the scroll.",        C_WHITE),
+        (font_sm,  "",                                             C_WHITE),
+        (font_sm,  "Move   Arrow / WASD      Jump   SPACE",        C_WHITE),
+        (font_sm,  "Double-jump   SPACE (air)   Glide   hold SPACE (falling)", C_WHITE),
+        (font_sm,  "Air Scooter   X / Shift  (ground)",            C_WHITE),
     ]
+    if board:
+        rows += [(font_sm, "", C_WHITE),
+                 (font_sm, f"Top score:  {board[0]['name']}  {board[0]['score']:,}", C_GOLD)]
+    rows += [(font_sm, "", C_WHITE), (font_sm, "Press any key to start", C_GOLD)]
+
     for i, (fnt, text, color) in enumerate(rows):
         if text:
             s = fnt.render(text, True, color)
-            surface.blit(s, s.get_rect(center=(WIDTH // 2, 110 + i * 46)))
+            surface.blit(s, s.get_rect(center=(WIDTH // 2, 90 + i * 44)))
 
 
-def draw_win(surface, font_big, font_sm, score: int, total: int):
-    surface.fill(C_DARK)
-    rows = [
-        (font_big, "YOU REACHED THE TOP!",            C_COLLECT),
-        (font_sm,  "",                                C_WHITE),
-        (font_sm,  f"Air Scrolls collected:  {score} / {total}", C_WHITE),
-        (font_sm,  "",                                C_WHITE),
-        (font_sm,  "Press R to play again",           C_WHITE),
-    ]
-    for i, (fnt, text, color) in enumerate(rows):
-        if text:
-            s = fnt.render(text, True, color)
-            surface.blit(s, s.get_rect(center=(WIDTH // 2, 240 + i * 58)))
-
-
-def draw_dead_overlay(surface, font_big, font_sm):
+def draw_name_entry(surface, font_big, font_sm, score: int, name: str, blink: bool):
     ov = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    ov.fill((18, 18, 38, 185))
+    ov.fill((18, 18, 38, 210))
     surface.blit(ov, (0, 0))
-    t1 = font_big.render("YOU FELL!", True, (255, 75, 75))
-    t2 = font_sm.render( "Press R to restart", True, C_WHITE)
-    surface.blit(t1, t1.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 30)))
-    surface.blit(t2, t2.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 30)))
+    lines = [
+        (font_big, "GAME OVER",           (255, 80, 80)),
+        (font_sm,  f"Score:  {score:,}",  C_GOLD),
+        (font_sm,  "",                    C_WHITE),
+        (font_sm,  "Enter your name:",    C_WHITE),
+        (font_big, name + ("|" if blink else " "), C_WHITE),
+        (font_sm,  "",                    C_WHITE),
+        (font_sm,  "Press Enter to save", C_WHITE),
+    ]
+    for i, (fnt, text, color) in enumerate(lines):
+        if text:
+            s = fnt.render(text, True, color)
+            surface.blit(s, s.get_rect(center=(WIDTH // 2, 180 + i * 56)))
 
 
-# ── Factory ────────────────────────────────────────────────────────────────────
+def draw_leaderboard(surface, font_big, font_sm, board: list, highlight: str):
+    surface.fill(C_DARK)
+    surface.blit(font_big.render("LEADERBOARD", True, C_GOLD),
+                 font_big.render("LEADERBOARD", True, C_GOLD)
+                 .get_rect(center=(WIDTH // 2, 50)))
+    for rank, entry in enumerate(board, 1):
+        name   = entry["name"]
+        pts    = entry["score"]
+        color  = C_GOLD if name == highlight else C_WHITE
+        line   = font_sm.render(f"#{rank:<2}  {name:<12} {pts:>8,}", True, color)
+        surface.blit(line, line.get_rect(center=(WIDTH // 2, 110 + rank * 42)))
+    footer = font_sm.render("R = play again     Esc = title", True, C_WHITE)
+    surface.blit(footer, footer.get_rect(center=(WIDTH // 2, HEIGHT - 30)))
+
+
+# ── Game factory ───────────────────────────────────────────────────────────────
 
 def make_game():
-    level  = Level()
-    player = Player(*PLAYER_START)
-    cam_y  = float(PLAYER_START[1] - HEIGHT // 2)
-    return level, player, cam_y
+    level        = ProceduralLevel()
+    player       = Player(PLAYER_START_X, PLAYER_START_Y)
+    cam_y        = float(PLAYER_START_Y - HEIGHT * 0.55)
+    ideal_cam_y  = cam_y
+    scroll_speed = SCROLL_SPEED_START
+    scroll_count = 0
+    return level, player, cam_y, ideal_cam_y, scroll_speed, scroll_count
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -108,9 +139,18 @@ def main():
     font_big = pygame.font.SysFont("Arial", 36, bold=True)
     font_sm  = pygame.font.SysFont("Arial", 17)
 
-    bg = Background()                          # generated once, never reset
+    bg    = Background()
+    board = scoreboard.load()
+
     state = "start"
-    level, player, cam_y = make_game()
+    level, player, cam_y, ideal_cam_y, scroll_speed, scroll_count = make_game()
+
+    # Scoring state
+    score        = 0
+    final_score  = 0
+    name_input   = ""
+    last_name    = ""
+    blink_timer  = 0
 
     while True:
         events = pygame.event.get()
@@ -123,54 +163,86 @@ def main():
 
         # ── START ──────────────────────────────────────────────────────────────
         if state == "start":
-            draw_start(screen, font_big, font_sm)
+            draw_start(screen, font_big, font_sm, board)
             for ev in events:
                 if ev.type == pygame.KEYDOWN:
+                    level, player, cam_y, ideal_cam_y, scroll_speed, scroll_count = make_game()
+                    score = 0
                     state = "play"
 
         # ── PLAY ───────────────────────────────────────────────────────────────
         elif state == "play":
-            if not player.dead:
-                player.handle_input(events, keys)
-                player.update(level.platforms, level.wind_currents)
-                level.update()
-                level.check_collect(player.rect)
+            # Auto-scroll: ideal camera creeps upward at increasing speed
+            scroll_speed  = min(scroll_speed + SCROLL_ACCEL, SCROLL_SPEED_MAX)
+            ideal_cam_y  -= scroll_speed
 
-                # Lerp camera toward player (slightly above centre)
-                target = player.rect.centery - HEIGHT * 0.55
-                target = max(0.0, min(float(LEVEL_HEIGHT - HEIGHT), target))
-                cam_y += (target - cam_y) * CAM_LERP
+            player.handle_input(events, keys)
+            player.update(level.platforms, level.wind_currents, level.bisons)
+            level.update(cam_y)
 
-                # ── Render ────────────────────────────────────────────────────
-                draw_sky(screen, cam_y)
-                bg.draw(screen, cam_y)          # parallax layers
-                level.draw(screen, cam_y)
-                player.draw(screen, cam_y)
+            new_scrolls  = level.check_collect(player.rect)
+            scroll_count += new_scrolls
 
-                height_pct = 1.0 - max(0.0, min(1.0, player.rect.y / LEVEL_HEIGHT))
-                draw_hud(screen, font_sm, level.score, level.total, height_pct)
+            # Score: height climbed + scroll bonuses
+            height_gained = max(0, PLAYER_START_Y - player.rect.y)
+            score = int(height_gained / HEIGHT_DIVISOR) + scroll_count * SCROLL_POINTS
 
-                if level.check_finish(player.rect):
-                    state = "win"
+            # Camera: follow player OR scroll, whichever is higher
+            player_cam  = player.rect.centery - HEIGHT * 0.55
+            target      = min(ideal_cam_y, player_cam)
+            cam_y      += (target - cam_y) * CAM_LERP
 
-            else:
-                # World frozen + overlay
-                draw_sky(screen, cam_y)
-                bg.draw(screen, cam_y)
-                level.draw(screen, cam_y)
-                player.draw(screen, cam_y)
-                draw_dead_overlay(screen, font_big, font_sm)
-                for ev in events:
-                    if ev.type == pygame.KEYDOWN and ev.key == pygame.K_r:
-                        level, player, cam_y = make_game()
+            # Death: player fell below visible area
+            if player.rect.top > cam_y + HEIGHT + 30:
+                player.dead = True
 
-        # ── WIN ────────────────────────────────────────────────────────────────
-        elif state == "win":
-            draw_win(screen, font_big, font_sm, level.score, level.total)
+            # Render
+            draw_sky(screen, cam_y)
+            bg.draw(screen, cam_y)
+            level.draw(screen, cam_y)
+            player.draw(screen, cam_y)
+            draw_hud(screen, font_sm, score, scroll_count, scroll_speed)
+
+            if player.dead:
+                final_score = score
+                name_input  = ""
+                blink_timer = 0
+                state       = "name_entry"
+
+        # ── NAME ENTRY ─────────────────────────────────────────────────────────
+        elif state == "name_entry":
+            blink_timer += 1
+            blink = (blink_timer // 30) % 2 == 0
+
+            # World still visible behind overlay
+            draw_sky(screen, cam_y)
+            bg.draw(screen, cam_y)
+            level.draw(screen, cam_y)
+            player.draw(screen, cam_y)
+            draw_name_entry(screen, font_big, font_sm, final_score, name_input, blink)
+
             for ev in events:
-                if ev.type == pygame.KEYDOWN and ev.key == pygame.K_r:
-                    level, player, cam_y = make_game()
-                    state = "play"
+                if ev.type == pygame.KEYDOWN:
+                    if ev.key == pygame.K_RETURN and name_input.strip():
+                        last_name = name_input.strip().upper()
+                        board = scoreboard.add(last_name, final_score)
+                        state = "leaderboard"
+                    elif ev.key == pygame.K_BACKSPACE:
+                        name_input = name_input[:-1]
+                    elif len(name_input) < 10 and ev.unicode.isprintable() and ev.unicode.strip():
+                        name_input += ev.unicode.upper()
+
+        # ── LEADERBOARD ────────────────────────────────────────────────────────
+        elif state == "leaderboard":
+            draw_leaderboard(screen, font_big, font_sm, board, last_name)
+            for ev in events:
+                if ev.type == pygame.KEYDOWN:
+                    if ev.key == pygame.K_r:
+                        level, player, cam_y, ideal_cam_y, scroll_speed, scroll_count = make_game()
+                        score = 0
+                        state = "play"
+                    elif ev.key == pygame.K_ESCAPE:
+                        state = "start"
 
         pygame.display.flip()
         clock.tick(FPS)
