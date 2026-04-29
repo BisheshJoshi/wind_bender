@@ -1,12 +1,24 @@
 import math
 import pygame
+import sprite_loader
 from constants import *
 
 
 class Player:
     W, H = 22, 32
 
+    # Sprites loaded once at first instantiation
+    _sprites: dict = {}
+    _sprites_loaded = False
+
+    @classmethod
+    def _load_sprites(cls):
+        if not cls._sprites_loaded:
+            cls._sprites = sprite_loader.load()
+            cls._sprites_loaded = True
+
     def __init__(self, x, y):
+        self._load_sprites()
         self.rect = pygame.Rect(x - self.W // 2, y - self.H, self.W, self.H)
         self.vel_x = 0.0
         self.vel_y = 0.0
@@ -162,15 +174,62 @@ class Player:
         dy = self.rect.y - round(cam_y)
         cx = dx + self.W // 2
 
-        if self.scooter_timer > 0:
-            self._draw_scooter(surface, dx, dy, cx)
-        elif self.gliding:
-            self._draw_glider(surface, dx, dy, cx)
-        else:
-            self._draw_body(surface, dx, dy, cx)
+        if self._sprites and not self._draw_sprite(surface, dx, dy):
+            # Sprite draw failed; fall back to primitives
+            if self.scooter_timer > 0:
+                self._draw_scooter(surface, dx, dy, cx)
+            elif self.gliding:
+                self._draw_glider(surface, dx, dy, cx)
+            else:
+                self._draw_body(surface, dx, dy, cx)
+            self._draw_head(surface, cx, dy - 9)
+        elif not self._sprites:
+            if self.scooter_timer > 0:
+                self._draw_scooter(surface, dx, dy, cx)
+            elif self.gliding:
+                self._draw_glider(surface, dx, dy, cx)
+            else:
+                self._draw_body(surface, dx, dy, cx)
+            self._draw_head(surface, cx, dy - 9)
 
-        self._draw_head(surface, cx, dy - 9)
         self._draw_blast(surface, dx, dy)
+
+    def _draw_sprite(self, surface, dx: int, dy: int) -> bool:
+        """Draw the correct animated sprite frame. Returns False if no frames."""
+        sp = self._sprites
+
+        if self.scooter_timer > 0:
+            key = "scoot_r" if self.scooter_dir > 0 else "scoot_l"
+        elif self.gliding:
+            key = "glide"
+        elif self._blast_anim > 0:
+            key = "blast"
+        elif self.vel_x != 0 and self.on_ground:
+            key = "walk_r" if self.facing > 0 else "walk_l"
+        else:
+            key = "idle"
+
+        # Fallback chain
+        frames = sp.get(key) or sp.get("idle") or []
+        if not frames:
+            return False
+
+        fps_divisor = 5   # advance one frame every N game ticks
+        frame_idx   = (self._tick // fps_divisor) % len(frames)
+        frame = frames[frame_idx]
+
+        fw, fh = frame.get_size()
+        # Centre the sprite on the player rect, bottom-aligned
+        sx = dx + self.W // 2 - fw // 2
+        sy = dy + self.H - fh
+
+        # Flip for left-facing states that only have right-facing art
+        needs_flip = (self.facing < 0 and key in ("idle", "glide", "blast"))
+        if needs_flip:
+            frame = pygame.transform.flip(frame, True, False)
+
+        surface.blit(frame, (sx, sy))
+        return True
 
     def _draw_body(self, surface, dx, dy, cx):
         bob = round(2 * math.sin(self._tick * 0.25)) if self.on_ground and self.vel_x != 0 else 0
